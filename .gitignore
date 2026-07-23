@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environments
+.venv/
+venv/
+env/
+.env
+
+# IDE / editors
+.vscode/
+.idea/
+
+# OS / logs
+.DS_Store
+Thumbs.db
+*.log
+
+# Data artifacts
+data/raw/*
+!data/raw/.gitkeep
+data/interim/*
+!data/interim/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# Model artifacts
+models/*
+!models/.gitkeep
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# Reports / figures
+reports/figures/*
+!reports/figures/.gitkeep
+
+# Local experiment outputs
+mlruns/
+wandb/
+tensorboard/

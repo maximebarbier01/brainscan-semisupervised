@@ -3,4 +3,20 @@ channels:
   - conda-forge
 dependencies:
   - python=3.12
-prefix: /home/maxime/miniforge3/envs/brainscan
+  - pip
+  - ipykernel
+  - jupyterlab
+  - matplotlib
+  - numpy
+  - pandas
+  - pillow
+  - plotly
+  - pyyaml
+  - scikit-image
+  - scikit-learn
+  - scipy
+  - seaborn
+  - tqdm
+  - umap-learn
+  - pip:
+      - opencv-python-headless
