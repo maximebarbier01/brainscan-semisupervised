@@ -1,0 +1,6 @@
+name: brainscan
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+prefix: /home/maxime/miniforge3/envs/brainscan
