@@ -21,3 +21,5 @@ dependencies:
   - umap-learn
   - pip:
       - opencv-python-headless
+      - torch
+      - torchvision
