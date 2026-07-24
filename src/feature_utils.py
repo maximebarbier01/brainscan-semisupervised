@@ -35,50 +35,59 @@ def build_preprocess(
     mean: tuple[float, float, float] = IMAGENET_MEAN,
     std: tuple[float, float, float] = IMAGENET_STD,
 ) -> transforms.Compose:
-    """Construit le pipeline de pretraitement attendu par ResNet18."""
+    """Construit le pipeline de prétraitement attendu par ResNet18."""
     return transforms.Compose(
         [
-            transforms.Resize(image_size, antialias=True),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=mean, std=std),
+            transforms.Resize(
+                image_size, antialias=True
+            ),  # Toutes les images sont ramenées à la même taille
+            transforms.ToTensor(),  # On cnvertit l'image Pillow en tenseur PyTorch - Les pixels passent de [0, 255] à [0, 1]
+            transforms.Normalize(
+                mean=mean, std=std
+            ),  # On normalise avec les statistiques ImageNet
         ]
     )
-
-
-def denormalize_image(
-    tensor: torch.Tensor,
-    *,
-    mean: tuple[float, float, float] = IMAGENET_MEAN,
-    std: tuple[float, float, float] = IMAGENET_STD,
-) -> np.ndarray:
-    """Ramene un tenseur normalise vers une image affichable dans matplotlib."""
-    image = tensor.detach().cpu().numpy().transpose(1, 2, 0)
-    image = (image * np.array(std)) + np.array(mean)
-    return np.clip(image, 0.0, 1.0)
 
 
 class BrainScanImageDataset(Dataset):
     """Dataset PyTorch base sur l'index construit pendant l'EDA."""
 
-    def __init__(self, frame: pd.DataFrame, project_root: Path, transform: transforms.Compose):
-        self.frame = frame.reset_index(drop=True).copy()
+    def __init__(
+        self, frame: pd.DataFrame, project_root: Path, transform: transforms.Compose
+    ):
+        self.frame = frame.reset_index(
+            drop=True
+        ).copy()  # on copie le DataFrame avec un index propre
         self.project_root = project_root
         self.transform = transform
 
     def __len__(self) -> int:
+        """Renvoie le nombre d'images disponibles."""
         return len(self.frame)
 
     def __getitem__(self, idx: int) -> dict[str, object]:
-        row = self.frame.iloc[idx]
-        image_path = self.project_root / row["relative_path"]
+        """Charge et prépare une image à partir de son index."""
+
+        row = self.frame.iloc[
+            idx
+        ]  # On récupère la ligne correspondant à l'image demandée
+        image_path = (
+            self.project_root / row["relative_path"]
+        )  # On reconstruit le chemin complet depuis le chemin relatif
 
         with Image.open(image_path) as image:
             # On harmonise tout en RGB pour rester compatible avec le modele pre-entraine.
             image_tensor = self.transform(image.convert("RGB"))
 
         # La valeur -1 permet de marquer explicitement les observations sans label fort.
-        label_strong_value = -1 if pd.isna(row["label_strong"]) else int(row["label_strong"])
-        label_strong_name = row["label_strong_name"] if pd.notna(row["label_strong_name"]) else "unlabeled"
+        label_strong_value = (
+            -1 if pd.isna(row["label_strong"]) else int(row["label_strong"])
+        )
+        label_strong_name = (
+            row["label_strong_name"]
+            if pd.notna(row["label_strong_name"])
+            else "unlabeled"
+        )
 
         return {
             "image": image_tensor,
@@ -97,40 +106,58 @@ def build_feature_extractor(
     device: torch.device,
 ) -> nn.Module:
     """Charge ResNet18 et remplace sa tete de classification par une sortie d'embedding."""
-    model = resnet18(weights=weights)
+
+    model = resnet18(
+        weights=weights
+    )  # On charge ResNet18 avec les poids pré-entraînés ImageNet
+    # On gèle tous les paramètres :aucun poids ne sera modifié pendant l'extraction
+
     for parameter in model.parameters():
         parameter.requires_grad = False
 
-    # On conserve uniquement le backbone convolutionnel pour recuperer un vecteur de features.
+    # La couche finale fc produit normalement les prédictions ImageNet.
+    # On la remplace par une identité pour récupérer les features.
     model.fc = nn.Identity()
-    model = model.to(device)
-    model.eval()
+    model = model.to(device)  # On déplace le modèle sur CPU ou GPU
+    model.eval()  # désactive notamment le comportement d'entraînement du modèle
     return model
 
 
 @torch.inference_mode()
-def infer_embedding_dim(model: nn.Module, image_size: tuple[int, int], device: torch.device) -> int:
-    """Estime la dimension de sortie des embeddings a partir d'un batch factice."""
+def infer_embedding_dim(
+    model: nn.Module, image_size: tuple[int, int], device: torch.device
+) -> int:
+    """Estime la dimension de sortie des embeddings a partir d'un dummy batch"""
+    # Création d'une fausse image noire
     dummy_batch = torch.zeros(1, 3, image_size[0], image_size[1], device=device)
     return int(model(dummy_batch).shape[1])
 
 
-def infer_feature_dim(model: nn.Module, image_size: tuple[int, int], device: torch.device) -> int:
-    """Alias conserve pour eviter de casser le notebook existant."""
+def infer_feature_dim(
+    model: nn.Module, image_size: tuple[int, int], device: torch.device
+) -> int:
+    """Alias conservé pour eviter de casser le notebook existant."""
     return infer_embedding_dim(model, image_size=image_size, device=device)
 
 
 @torch.inference_mode()
-def extract_embeddings(model: nn.Module, loader: DataLoader, device: torch.device) -> tuple[pd.DataFrame, np.ndarray]:
+def extract_embeddings(
+    model: nn.Module, loader: DataLoader, device: torch.device
+) -> tuple[pd.DataFrame, np.ndarray]:
     """Extrait un embedding par image et conserve les metadonnees alignees."""
+
+    # Stockage temporaire batch par batch
     metadata_batches: list[pd.DataFrame] = []
     feature_batches: list[np.ndarray] = []
 
-    for batch in tqdm(loader, desc="Extraction des embeddings"):
+    for batch in tqdm(loader, desc="Extraction des embeddings", colour="#CA50E6"):
         images = batch["image"].to(device, non_blocking=device.type == "cuda")
+
+        # Passage des images dans ResNet18
         embeddings = model(images).detach().cpu().numpy().astype(np.float32)
 
         feature_batches.append(embeddings)
+        # On conserve les métadonnées dans le même ordre que les embeddings du batch
         metadata_batches.append(
             pd.DataFrame(
                 {
@@ -149,18 +176,41 @@ def extract_embeddings(model: nn.Module, loader: DataLoader, device: torch.devic
     return metadata_df, feature_array
 
 
-def build_feature_table(metadata_df: pd.DataFrame, feature_array: np.ndarray) -> pd.DataFrame:
-    """Assemble les metadonnees et les dimensions d'embedding dans une meme table."""
+def build_feature_table(
+    metadata_df: pd.DataFrame, feature_array: np.ndarray
+) -> pd.DataFrame:
+    """Assemble les métadonnées et les dimensions d'embedding dans une même table."""
     feature_columns = [f"feat_{idx:04d}" for idx in range(feature_array.shape[1])]
     feature_df = pd.DataFrame(feature_array, columns=feature_columns)
-    feature_table_df = pd.concat([metadata_df.reset_index(drop=True), feature_df], axis=1)
-    feature_table_df["embedding_l2_norm"] = np.linalg.norm(feature_array, axis=1)
+
+    # On concatène horizontalement les métadonnées et les features
+    feature_table_df = pd.concat(
+        [metadata_df.reset_index(drop=True), feature_df], axis=1
+    )
+    feature_table_df["embedding_l2_norm"] = np.linalg.norm(feature_array, ord=2, axis=1)
     return feature_table_df
 
 
 # *****************#
 # * Visualisation *#
 # *****************#
+
+
+def denormalize_image(
+    tensor: torch.Tensor,
+    *,
+    mean: tuple[float, float, float] = IMAGENET_MEAN,
+    std: tuple[float, float, float] = IMAGENET_STD,
+) -> np.ndarray:
+    """Ramène un tenseur normalisé vers une image affichable dans matplotlib."""
+    image = (
+        tensor.detach().cpu().numpy().transpose(1, 2, 0)
+    )  # Détachement du graphe, retour sur CPU et conversion en tableau NumPy
+    # On transpose car PyTorch utilise (canaux, hauteur, largeur), alors que matplotlib attend (hauteur, largeur, canaux)
+    image = (image * np.array(std)) + np.array(mean)  # On inverse de la normalisation :
+    return np.clip(
+        image, 0.0, 1.0
+    )  # On sécurise les valeurs dans l'intervalle affichable [0, 1]
 
 
 def show_preprocessing_examples(
@@ -170,7 +220,7 @@ def show_preprocessing_examples(
     preprocess: transforms.Compose,
     random_seed: int = 42,
 ) -> plt.Figure | None:
-    """Affiche un exemple brut et pretraite pour chaque groupe disponible."""
+    """Affiche un exemple brut et prétraite pour chaque groupe disponible."""
     sample_groups = ["cancer", "normal", "unlabeled"]
     sample_rows: list[pd.DataFrame] = []
 
