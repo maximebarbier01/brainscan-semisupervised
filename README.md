@@ -55,12 +55,46 @@ if torch.cuda.is_available():
 PY
 ```
 
-## Workflow
+## Workflow analytique
 
 1. `notebooks/01_eda.ipynb` : import, inspection visuelle, resolution, canaux, structure du dataset.
 2. `notebooks/02_feature_extraction.ipynb` : preprocessing et extraction d'embeddings.
-3. `notebooks/03_unsupervised_analysis.ipynb` : PCA/t-SNE, clustering et labels faibles.
-4. `notebooks/04_semi_supervised_training.ipynb` : comparaison supervise vs semi-supervise.
+3. `notebooks/03_clustering_unsupervised.ipynb` : PCA, t-SNE, UMAP, clustering et labels faibles.
+4. `notebooks/04_semi_supervised_learning.ipynb` : comparaison supervise vs semi-supervise.
+
+## Workflow Git
+
+- `main` : branche stable et presentable.
+- `develop` : branche d'integration du projet.
+- `docs/*` : README, presentation, synthese, documentation.
+- `chore/*` : environnement, gitignore, structure du repo, outillage.
+- `refactor/*` : deplacement de logique des notebooks vers `src/`.
+- `exp/*` : exploration, tests de methodes, visualisations et comparaisons.
+- `feat/*` : ajout d'un bloc fonctionnel valide.
+- `fix/*` : correction ciblee.
+
+Flux recommande :
+
+```bash
+git switch develop
+git pull origin develop
+git switch -c exp/embeddings-and-clustering
+```
+
+Puis :
+
+```bash
+git add .
+git commit -m "Compare embeddings and clustering variants"
+git push -u origin exp/embeddings-and-clustering
+```
+
+Bonnes pratiques :
+
+- Une branche = un bloc de travail coherent.
+- Les branches de travail partent de `develop`, pas de `main`.
+- On merge d'abord vers `develop`, puis vers `main` quand l'ensemble est propre.
+- Les notebooks servent a l'analyse; la logique reutilisable doit migrer vers `src/`.
 
 ## Regles de projet
 
