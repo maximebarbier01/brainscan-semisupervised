@@ -147,6 +147,7 @@ def safe_inspect_image(path: Path, project_root: Path) -> dict:
                 "aspect_ratio": round(width / height, 4) if height else np.nan,
                 # Statistiques globales en niveaux de gris
                 "gray_mean": round(float(gray_array.mean()), 3),
+                "gray_median": round(float(np.median(gray_array)), 3),
                 "gray_std": round(float(gray_array.std()), 3),
                 "gray_min": int(gray_array.min()),
                 "gray_max": int(gray_array.max()),
@@ -166,6 +167,7 @@ def safe_inspect_image(path: Path, project_root: Path) -> dict:
             "bands": None,
             "aspect_ratio": np.nan,
             "gray_mean": np.nan,
+            "gray_median": np.nan,
             "gray_std": np.nan,
             "gray_min": np.nan,
             "gray_max": np.nan,
