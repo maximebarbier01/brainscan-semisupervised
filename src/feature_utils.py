@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
@@ -14,12 +15,22 @@ from torchvision import transforms
 from torchvision.models import ResNet18_Weights, resnet18
 from tqdm.auto import tqdm
 
+# **************#
+# * Parametres *#
+# **************#
+
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
+DEFAULT_IMAGE_SIZE = (224, 224)
+
+
+# ***************#
+# * Definitions *#
+# ***************#
 
 
 def build_preprocess(
-    image_size: tuple[int, int] = (224, 224),
+    image_size: tuple[int, int] = DEFAULT_IMAGE_SIZE,
     *,
     mean: tuple[float, float, float] = IMAGENET_MEAN,
     std: tuple[float, float, float] = IMAGENET_STD,
@@ -98,10 +109,15 @@ def build_feature_extractor(
 
 
 @torch.inference_mode()
-def infer_feature_dim(model: nn.Module, image_size: tuple[int, int], device: torch.device) -> int:
-    """Estime la dimension de sortie du backbone a partir d'un batch factice."""
+def infer_embedding_dim(model: nn.Module, image_size: tuple[int, int], device: torch.device) -> int:
+    """Estime la dimension de sortie des embeddings a partir d'un batch factice."""
     dummy_batch = torch.zeros(1, 3, image_size[0], image_size[1], device=device)
     return int(model(dummy_batch).shape[1])
+
+
+def infer_feature_dim(model: nn.Module, image_size: tuple[int, int], device: torch.device) -> int:
+    """Alias conserve pour eviter de casser le notebook existant."""
+    return infer_embedding_dim(model, image_size=image_size, device=device)
 
 
 @torch.inference_mode()
@@ -140,3 +156,51 @@ def build_feature_table(metadata_df: pd.DataFrame, feature_array: np.ndarray) ->
     feature_table_df = pd.concat([metadata_df.reset_index(drop=True), feature_df], axis=1)
     feature_table_df["embedding_l2_norm"] = np.linalg.norm(feature_array, axis=1)
     return feature_table_df
+
+
+# *****************#
+# * Visualisation *#
+# *****************#
+
+
+def show_preprocessing_examples(
+    df: pd.DataFrame,
+    *,
+    project_root: Path,
+    preprocess: transforms.Compose,
+    random_seed: int = 42,
+) -> plt.Figure | None:
+    """Affiche un exemple brut et pretraite pour chaque groupe disponible."""
+    sample_groups = ["cancer", "normal", "unlabeled"]
+    sample_rows: list[pd.DataFrame] = []
+
+    for group in sample_groups:
+        subset = df.loc[df["label_group"] == group]
+        if not subset.empty:
+            sample_rows.append(subset.sample(n=1, random_state=random_seed))
+
+    if not sample_rows:
+        return None
+
+    sample_df = pd.concat(sample_rows, ignore_index=True)
+    fig, axes = plt.subplots(len(sample_df), 2, figsize=(10, 4 * len(sample_df)))
+
+    if len(sample_df) == 1:
+        axes = np.array([axes])
+
+    for row_idx, row in sample_df.iterrows():
+        image_path = project_root / row["relative_path"]
+        with Image.open(image_path) as image:
+            rgb_image = image.convert("RGB")
+            processed_image = preprocess(rgb_image)
+
+        axes[row_idx, 0].imshow(rgb_image)
+        axes[row_idx, 0].set_title(f"Original - {row['label_group']}")
+        axes[row_idx, 0].axis("off")
+
+        axes[row_idx, 1].imshow(denormalize_image(processed_image))
+        axes[row_idx, 1].set_title(f"Pretraitee - {row['label_group']}")
+        axes[row_idx, 1].axis("off")
+
+    plt.tight_layout()
+    return fig
