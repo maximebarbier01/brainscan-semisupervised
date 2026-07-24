@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 import numpy as np
 import pandas as pd
+from PIL import Image
 import seaborn as sns
 from sklearn.cluster import DBSCAN, KMeans
 from sklearn.decomposition import PCA
@@ -291,6 +295,21 @@ def build_mapping_summary_df(mapping: dict[int, int]) -> pd.DataFrame:
     )
 
 
+def build_kmeans_diagnostic_frame(model: KMeans, features: np.ndarray) -> pd.DataFrame:
+    """Calcule des indicateurs simples de confiance autour des centroïdes KMeans."""
+    distances = model.transform(features)
+    sorted_distances = np.sort(distances, axis=1)
+
+    return pd.DataFrame(
+        {
+            # Distance au centroïde assigné : plus elle est faible, plus l'image est typique du cluster.
+            "distance_to_centroid": sorted_distances[:, 0],
+            # Ecart entre le meilleur et le deuxième centroïde : plus il est grand, plus l'affectation est nette.
+            "distance_margin": sorted_distances[:, 1] - sorted_distances[:, 0],
+        }
+    )
+
+
 def scatter_embedding(
     ax: Axes,
     frame: pd.DataFrame,
@@ -315,3 +334,195 @@ def scatter_embedding(
     ax.set_title(title)
     ax.set_xlabel(x_col)
     ax.set_ylabel(y_col)
+
+
+def plot_metric_barh(
+    ax: Axes,
+    comparison_df: pd.DataFrame,
+    metric_col: str,
+    title: str,
+    *,
+    value_label: str | None = None,
+) -> None:
+    """Affiche un classement horizontal des configurations selon une metrique donnee."""
+    plot_df = comparison_df.dropna(subset=[metric_col]).copy()
+    plot_df["configuration"] = plot_df["method"] + " | " + plot_df["space"]
+    plot_df = plot_df.sort_values(metric_col, ascending=True)
+
+    sns.barplot(
+        data=plot_df,
+        x=metric_col,
+        y="configuration",
+        hue="method",
+        dodge=False,
+        palette="Set2",
+        ax=ax,
+    )
+    ax.set_title(title)
+    ax.set_xlabel(value_label or metric_col)
+    ax.set_ylabel("Configuration")
+
+    for patch in ax.patches:
+        width = patch.get_width()
+        if np.isnan(width):
+            continue
+        ax.text(
+            width,
+            patch.get_y() + patch.get_height() / 2,
+            f" {width:.3f}",
+            va="center",
+            ha="left",
+            fontsize=9,
+        )
+
+    legend = ax.get_legend()
+    if legend is not None:
+        legend.set_title("Méthode")
+
+
+def plot_cluster_label_composition(
+    ax: Axes,
+    frame: pd.DataFrame,
+    cluster_col: str,
+    label_col: str,
+    title: str,
+    *,
+    normalize: bool = True,
+) -> pd.DataFrame:
+    """Trace la composition de chaque cluster selon les labels disponibles."""
+    composition_df = pd.crosstab(
+        frame[cluster_col],
+        frame[label_col],
+        normalize="index" if normalize else False,
+    ).sort_index()
+
+    if normalize:
+        composition_df = composition_df * 100
+
+    composition_df.plot(
+        kind="bar",
+        stacked=True,
+        ax=ax,
+        color=sns.color_palette("Set2", n_colors=max(2, composition_df.shape[1])),
+        width=0.8,
+    )
+    ax.set_title(title)
+    ax.set_xlabel("Cluster")
+    ax.set_ylabel("Part (%)" if normalize else "Nombre d'images")
+    ax.legend(title="Label", loc="best")
+    return composition_df
+
+
+def plot_category_counts(
+    ax: Axes,
+    frame: pd.DataFrame,
+    category_col: str,
+    title: str,
+    *,
+    order: list[object] | None = None,
+) -> pd.DataFrame:
+    """Affiche le nombre d'observations par categorie avec annotations."""
+    counts_df = (
+        frame[category_col]
+        .value_counts(dropna=False)
+        .rename_axis(category_col)
+        .reset_index(name="count")
+    )
+
+    if order is not None:
+        counts_df[category_col] = pd.Categorical(
+            counts_df[category_col],
+            categories=order,
+            ordered=True,
+        )
+        counts_df = counts_df.sort_values(category_col)
+
+    sns.barplot(
+        data=counts_df,
+        x=category_col,
+        y="count",
+        palette="Set2",
+        ax=ax,
+    )
+    ax.set_title(title)
+    ax.set_xlabel(category_col)
+    ax.set_ylabel("Nombre d'images")
+
+    for patch in ax.patches:
+        height = patch.get_height()
+        ax.text(
+            patch.get_x() + patch.get_width() / 2,
+            height,
+            f"{int(height)}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
+
+    return counts_df
+
+
+def plot_representative_images_by_group(
+    frame: pd.DataFrame,
+    *,
+    project_root: Path,
+    group_col: str,
+    score_col: str,
+    title: str,
+    n_per_group: int = 4,
+    ascending: bool = True,
+    image_col: str = "relative_path",
+    caption_cols: list[str] | None = None,
+) -> plt.Figure:
+    """Affiche les images les plus representatives d'un groupe selon un score donne."""
+    caption_cols = caption_cols or []
+    selected_df = (
+        frame.sort_values([group_col, score_col], ascending=[True, ascending])
+        .groupby(group_col, as_index=False, group_keys=False)
+        .head(n_per_group)
+        .copy()
+    )
+
+    groups = list(selected_df[group_col].dropna().unique())
+    nrows = len(groups)
+    ncols = n_per_group
+
+    fig, axes = plt.subplots(
+        nrows=nrows,
+        ncols=ncols,
+        figsize=(3.5 * ncols, 3.8 * max(nrows, 1)),
+    )
+    axes = np.atleast_2d(axes)
+
+    for row_idx, group_value in enumerate(groups):
+        group_df = selected_df.loc[selected_df[group_col] == group_value].reset_index(drop=True)
+
+        for col_idx in range(ncols):
+            ax = axes[row_idx, col_idx]
+            ax.axis("off")
+
+            if col_idx >= len(group_df):
+                continue
+
+            row = group_df.iloc[col_idx]
+            image_path = project_root / row[image_col]
+
+            with Image.open(image_path) as image:
+                if image.mode == "L":
+                    ax.imshow(image, cmap="gray")
+                else:
+                    ax.imshow(image.convert("RGB"))
+
+            caption_lines = [f"{group_col}={group_value}"]
+            for column in caption_cols:
+                value = row[column]
+                if isinstance(value, (float, np.floating)):
+                    caption_lines.append(f"{column}={value:.3f}")
+                else:
+                    caption_lines.append(f"{column}={value}")
+
+            ax.set_title("\n".join(caption_lines), fontsize=9)
+
+    fig.suptitle(title, fontsize=16)
+    plt.tight_layout()
+    return fig
